@@ -1,0 +1,3 @@
+# https://stackoverflow.com/questions/63829128/how-can-i-make-bandit-skip-b101-within-tests
+assert_used:
+  skips: ["*/test_*.py", "*/test_*.py"]

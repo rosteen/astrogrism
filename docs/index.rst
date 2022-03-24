@@ -21,6 +21,7 @@ Using Astrogrism
   installation.rst
   quickstart.rst
   transforms.rst
+  simulations.rst
 
 
 Reference/API
