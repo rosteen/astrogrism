@@ -8,6 +8,7 @@ from warnings import warn
 
 from astropy.utils.data import download_file
 from astropy.io.fits import ImageHDU
+import astropy.units as u
 from synphot import Observation
 import numpy as np
 import progressbar
@@ -136,13 +137,21 @@ def disperse_spectrum_on_image(grism_file, wide_field_image, spectrum, detector=
     if type(wide_field_image) is ImageHDU:
         data = wide_field_image.data
     else:
-        data = wide_field_image
+        data = wide_field_image*u.Jy
 
-    shape = data.shape
-    simulated_data = np.zeros(shape)
+    # A stupid way of getting all zeroes while preserving units if a Quantity
+    simulated_data = data-data
+
+    print(spectrum)
+    normalized_spec_flux = spectrum.flux / spectrum.flux.sum()
+
+    x_flat, y_flat = np.meshgrid(np.arange(0, data.shape[0]), np.arange(0, data.shape[1]))
+    x_flat = x_flat.flatten()
+    y_flat = y_flat.flatten()
+    data_flux = data.flatten()
 
     # Start progressbar
-    bar = progressbar.ProgressBar(maxval=shape[0],
+    bar = progressbar.ProgressBar(maxval=spectrum.wavelength.shape[0],
                                   widgets=[progressbar.Bar('=', '[', ']'),
                                            ' ',
                                            progressbar.Percentage()
@@ -151,30 +160,32 @@ def disperse_spectrum_on_image(grism_file, wide_field_image, spectrum, detector=
     bar.start()
 
     # For each pixel in the science image, we need to disperse it's spectrum
-    for x_pixel in range(0, shape[0]):
-        bar.update(x_pixel)
-        for y_pixel in range(0, shape[1]):
-            # Get the flux of the science pixel
-            # We'll need to scale the spectrum to this brightness later
-            data_flux = data[x_pixel][y_pixel]
-            if np.isnan(data_flux) or (data_flux == 0):
-                continue
+    for i in range(0, spectrum.wavelength.shape[0]):
+        bar.update(i)
+        # Get the flux of the science pixel
+        # We'll need to scale the spectrum to this brightness later
+        #data_flux = data[x_pixel][y_pixel]
 
-            # For each Wavelength in the spectrum,
-            # calculate where, in pixels, that wavelength would fall on the detector
-            dispersed_coords = image2grism(x_pixel, y_pixel, spectrum.wavelength, 1)
-            for step in range(0, len(spectrum.wavelength)):
-                spectrum_flux = spectrum.flux[step]
+        # For each Wavelength in the spectrum,
+        # calculate where, in pixels, that wavelength would fall on the detector
+        dispersed_coords = image2grism(x_flat, y_flat, spectrum.wavelength[i], 1)
+        # TBF: Substitute floor with proper subpixel drizzling
+        dispersed_x = np.floor(dispersed_coords[0])
+        dispersed_y = np.floor(dispersed_coords[1])
 
-                dispersed_x = dispersed_coords[0][step]
-                dispersed_y = dispersed_coords[1][step]
+        # Find which dispersed coordinates actually lie on the detector
+        good_coords = np.where((dispersed_x > 0) & (dispersed_x < data.shape[0]) &
+                               (dispersed_y > 0) & (dispersed_y < data.shape[1]))
 
-                # If the dispersed position of the wavelength is inside the bounds of the image,
-                # write the spectrum
-                if (0 < dispersed_x < simulated_data.shape[0]) and (0 < dispersed_y < simulated_data.shape[1]): # noqa
-                    # Scale the flux of the spectrum to the brightness of the original pixel
-                    # TBF: Substitute floor with proper subpixel drizzling
-                    simulated_data[floor(dispersed_x)][floor(dispersed_y)] += (data_flux * spectrum_flux).value # noqa
+        s_x = dispersed_x[good_coords].astype(int)
+        s_y = dispersed_y[good_coords].astype(int)
+        #print(f"s_x: {s_x}")
+        #print(f"x_flat: {x_flat[good_coords]}")
+
+        temp_flux = data*normalized_spec_flux[i]
+
+        simulated_data[s_x, s_y] += temp_flux[x_flat[good_coords], y_flat[good_coords]]
+
     bar.finish()
     return simulated_data
 
